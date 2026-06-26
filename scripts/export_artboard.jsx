@@ -11,6 +11,7 @@
 (function () {
 var ARTBOARD_INDEX = Number($.getenv('AI_TO_PPT_ARTBOARD_INDEX') || 0); // zero-based: first artboard = 0
 var OUT_DIR = $.getenv('AI_TO_PPT_OUT_DIR') || 'exports/artboard_001';
+var APPEARANCE_MODE = String($.getenv('AI_TO_PPT_APPEARANCE_MODE') || 'auto').toLowerCase(); // auto, layers, full-context
 
 function resolvePath(pathValue) {
   var p = String(pathValue || '');
@@ -27,10 +28,53 @@ try {
   function q(s) { return '"' + esc(s) + '"'; }
   function intersects(b, ab) { return !(b[2] <= ab[0] || b[0] >= ab[2] || b[3] >= ab[1] || b[1] <= ab[3]); }
   function clampBounds(b, ab) { return [Math.max(b[0], ab[0]), Math.min(b[1], ab[1]), Math.min(b[2], ab[2]), Math.max(b[3], ab[3])]; }
+  function usableBounds(b) { return b && (b[2] - b[0]) > 0.5 && (b[1] - b[3]) > 0.5; }
   function normBounds(b, ab) { return '{"left":' + b[0] + ',"top":' + b[1] + ',"right":' + b[2] + ',"bottom":' + b[3] + ',"x":' + (b[0]-ab[0]) + ',"y":' + (ab[1]-b[1]) + ',"w":' + (b[2]-b[0]) + ',"h":' + (b[1]-b[3]) + '}'; }
-  function hasText(item) { if (item.typename == 'TextFrame') return true; if (item.pageItems) { for (var i=0;i<item.pageItems.length;i++) if (hasText(item.pageItems[i])) return true; } return false; }
-  function hasNonText(item) { if (item.typename == 'TextFrame') return false; if (item.pageItems && item.pageItems.length > 0) { for (var i=0;i<item.pageItems.length;i++) if (hasNonText(item.pageItems[i])) return true; return false; } return true; }
+  function childCollections(item) {
+    var collections = [];
+    try { if (item.pageItems && item.pageItems.length) collections.push(item.pageItems); } catch(e) {}
+    try { if (item.pathItems && item.pathItems.length) collections.push(item.pathItems); } catch(e2) {}
+    return collections;
+  }
+  function hasText(item) {
+    if (item.typename == 'TextFrame') return true;
+    var collections = childCollections(item);
+    for (var c=0;c<collections.length;c++) for (var i=0;i<collections[c].length;i++) if (hasText(collections[c][i])) return true;
+    return false;
+  }
+  function hasNonText(item) {
+    if (item.typename == 'TextFrame') return false;
+    var collections = childCollections(item);
+    if (collections.length) {
+      for (var c=0;c<collections.length;c++) for (var i=0;i<collections[c].length;i++) if (hasNonText(collections[c][i])) return true;
+      return false;
+    }
+    return true;
+  }
   function topLevelItems(doc) { var out=[]; for (var i=0;i<doc.pageItems.length;i++) if (doc.pageItems[i].parent && doc.pageItems[i].parent.typename == 'Layer') out.push(doc.pageItems[i]); return out; }
+  function colorType(c) { try { return c ? String(c.typename) : ''; } catch(e) { return ''; } }
+  function itemUsesGradient(item) {
+    try { if (item.filled && colorType(item.fillColor) == 'GradientColor') return true; } catch(e) {}
+    try { if (item.stroked && colorType(item.strokeColor) == 'GradientColor') return true; } catch(e2) {}
+    var collections = childCollections(item);
+    for (var c=0;c<collections.length;c++) for (var i=0;i<collections[c].length;i++) if (itemUsesGradient(collections[c][i])) return true;
+    return false;
+  }
+  function nonNormalBlend(item) {
+    try {
+      var bm = String(item.blendingMode || '');
+      return bm && bm != 'BlendModes.NORMAL' && bm != 'NORMAL';
+    } catch(e) { return false; }
+  }
+  function complexAppearance(item) {
+    if (item.typename == 'PluginItem') return true;
+    if (item.typename == 'CompoundPathItem' && itemUsesGradient(item)) return true;
+    if (itemUsesGradient(item) && nonNormalBlend(item)) return true;
+    try { if (item.clipped && itemUsesGradient(item)) return true; } catch(e) {}
+    var collections = childCollections(item);
+    for (var c=0;c<collections.length;c++) for (var i=0;i<collections[c].length;i++) if (complexAppearance(collections[c][i])) return true;
+    return false;
+  }
   function hex(n) { n=Math.max(0,Math.min(255,Math.round(n))); var s=n.toString(16).toUpperCase(); return s.length<2?'0'+s:s; }
   function colorToHex(c) {
     try {
@@ -115,7 +159,11 @@ try {
   var tops = topLevelItems(doc);
   var candidates = [];
   for (var i=0;i<tops.length;i++) {
-    try { var b=tops[i].visibleBounds; if (intersects(b, ab) && hasNonText(tops[i])) candidates.push({item:tops[i], index:i, bounds:clampBounds(b,ab), hasText:hasText(tops[i])}); } catch(e) {}
+    try {
+      var b=tops[i].visibleBounds;
+      var cb = clampBounds(b,ab);
+      if (intersects(b, ab) && usableBounds(cb) && hasNonText(tops[i])) candidates.push({item:tops[i], index:i, bounds:cb, hasText:hasText(tops[i]), complex:complexAppearance(tops[i])});
+    } catch(e) {}
   }
 
   var texts = [];
@@ -130,20 +178,32 @@ try {
 
   var imageMeta = [];
   var opts = new ImageCaptureOptions(); opts.resolution = 72; opts.antiAliasing = true; opts.transparency = true;
-  for (var c=0;c<candidates.length;c++) {
-    for (var h=0;h<tops.length;h++) { try { tops[h].hidden = true; } catch(e5) {} }
-    try { candidates[c].item.hidden = false; } catch(e6) {}
+  var complexDetected = false;
+  for (var cd=0;cd<candidates.length;cd++) if (candidates[cd].complex) complexDetected = true;
+  var exportMode = (APPEARANCE_MODE == 'full-context' || (APPEARANCE_MODE == 'auto' && complexDetected)) ? 'full-context' : 'layers';
+
+  if (exportMode == 'full-context') {
     for (var tx=0;tx<doc.textFrames.length;tx++) { try { doc.textFrames[tx].hidden = true; } catch(e7) {} }
-    var fileName = 'layer_' + ('000' + (c+1)).slice(-3) + '.png';
-    var file = new File(imgFolder.fsName + '/' + fileName);
-    doc.imageCapture(file, candidates[c].bounds, opts);
-    imageMeta.push('{"file":' + q('images/' + fileName) + ',"sourceIndex":' + candidates[c].index + ',"typename":' + q(candidates[c].item.typename) + ',"hasText":' + (candidates[c].hasText?'true':'false') + ',"bounds":' + normBounds(candidates[c].bounds, ab) + '}');
+    var fullFileName = 'artwork_full_context.png';
+    var fullFile = new File(imgFolder.fsName + '/' + fullFileName);
+    doc.imageCapture(fullFile, ab, opts);
+    imageMeta.push('{"file":' + q('images/' + fullFileName) + ',"sourceIndex":-1,"typename":"FullContextNonText","hasText":false,"fullContext":true,"bounds":' + normBounds(ab, ab) + '}');
+  } else {
+    for (var c=0;c<candidates.length;c++) {
+      for (var h=0;h<tops.length;h++) { try { tops[h].hidden = true; } catch(e5) {} }
+      try { candidates[c].item.hidden = false; } catch(e6) {}
+      for (var tx2=0;tx2<doc.textFrames.length;tx2++) { try { doc.textFrames[tx2].hidden = true; } catch(e7b) {} }
+      var fileName = 'layer_' + ('000' + (c+1)).slice(-3) + '.png';
+      var file = new File(imgFolder.fsName + '/' + fileName);
+      doc.imageCapture(file, candidates[c].bounds, opts);
+      imageMeta.push('{"file":' + q('images/' + fileName) + ',"sourceIndex":' + candidates[c].index + ',"typename":' + q(candidates[c].item.typename) + ',"hasText":' + (candidates[c].hasText?'true':'false') + ',"complexAppearance":' + (candidates[c].complex?'true':'false') + ',"bounds":' + normBounds(candidates[c].bounds, ab) + '}');
+    }
   }
 
   for (var r=0;r<allItems.length;r++) { try { allItems[r].item.hidden=allItems[r].hidden; allItems[r].item.locked=allItems[r].locked; } catch(e8) {} }
   for (var lr=0;lr<layers.length;lr++) { try { layers[lr].layer.visible=layers[lr].visible; layers[lr].layer.locked=layers[lr].locked; } catch(e9) {} }
 
-  var json = '{"document":' + q(doc.name) + ',"artboardIndex":' + (ARTBOARD_INDEX+1) + ',"artboardRect":[' + ab.join(',') + '],"imageCandidateCount":' + candidates.length + ',"exportedImageCount":' + imageMeta.length + ',"textCount":' + texts.length + ',"images":[' + imageMeta.join(',') + '],"texts":[' + texts.join(',') + ']}';
+  var json = '{"document":' + q(doc.name) + ',"artboardIndex":' + (ARTBOARD_INDEX+1) + ',"artboardRect":[' + ab.join(',') + '],"appearanceMode":' + q(APPEARANCE_MODE) + ',"exportMode":' + q(exportMode) + ',"complexAppearanceDetected":' + (complexDetected?'true':'false') + ',"imageCandidateCount":' + candidates.length + ',"exportedImageCount":' + imageMeta.length + ',"textCount":' + texts.length + ',"images":[' + imageMeta.join(',') + '],"texts":[' + texts.join(',') + ']}';
   var f = new File(OUT_DIR + '/manifest.json'); f.encoding='UTF-8'; f.open('w'); f.write(json); f.close();
 } catch (err) {
   var fallback = Folder.temp.fsName.replace(/\\/g, '/') + '/ai_to_ppt_export_error.txt';

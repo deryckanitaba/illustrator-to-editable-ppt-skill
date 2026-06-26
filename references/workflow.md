@@ -29,17 +29,18 @@ Complex fonts, special effects, and individual line wrapping differences still r
 ```javascript
 var ARTBOARD_INDEX = 0;
 var OUT_DIR = 'exports/artboard_001';
+var APPEARANCE_MODE = 'auto'; // auto, layers, full-context
 ```
 
-`ARTBOARD_INDEX` is zero-based. The first artboard is `0`.
+`ARTBOARD_INDEX` is zero-based. The first artboard is `0`. `APPEARANCE_MODE=auto` detects compound gradients and other complex appearances and exports non-text artwork in full context when needed; use `layers` to force per-object PNG layers, or `full-context` to force visual-preservation mode.
 
 5. Run the JSX with Illustrator using the launch method for your operating system and Illustrator installation.
 6. If Illustrator asks whether to allow the script, click continue.
 7. Confirm the export directory contains:
 
 - `manifest.json`
-- `images/layer_001.png`
-- any additional `images/layer_*.png` files
+- `images/layer_001.png`, or `images/artwork_full_context.png` when complex-appearance preservation is active
+- any additional `images/layer_*.png` files when layer mode is active
 
 8. Build the PPTX:
 
@@ -75,9 +76,10 @@ Example: an Illustrator artboard of `3840 x 2160 pt` becomes:
 - Process objects that intersect the target artboard.
 - Treat Illustrator `TextFrame` objects as text metadata, not image layers.
 - Treat non-text top-level objects or groups as PNG layer candidates.
-- Temporarily hide all other objects while each PNG layer is captured.
+- In `layers` mode, temporarily hide all other objects while each PNG layer is captured.
+- In `auto` mode, detect compound-gradient, clipping, plugin, or non-normal blend appearances; when found, hide text and export all non-text artwork in full context as `artwork_full_context.png`.
 - Export PNG layers with transparency enabled.
-- Record each PNG layer path and bounds relative to the artboard.
+- Record each PNG layer path, export mode, and bounds relative to the artboard.
 - Restore Illustrator layer and item hidden/locked state after export.
 - Write all metadata to `manifest.json`.
 

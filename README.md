@@ -17,10 +17,10 @@
 ## 工作原理
 
 1. `export_artboard.jsx` 在 Illustrator 中读取当前活动文档和目标画板。
-2. 非文字对象按顶层对象或组导出为透明 PNG layer。
+2. 非文字对象默认按顶层对象或组导出为透明 PNG layer；当检测到复合渐变、剪切、PluginItem 或非 Normal 混合等复杂外观时，默认 `auto` 模式会把非文字 artwork 在完整上下文中合成为一张透明 PNG，以优先保证渐变颜色和视觉一致性。
 3. 文字对象不导出为图片，而是记录内容、位置、字体、字号、颜色、段落对齐和字符 run。
 4. `build_pptx.py` 根据 `manifest.json` 创建 PPT，按 Illustrator 画板尺寸设置页面大小。
-5. PNG layer 按坐标放入 PPT，文字按 metadata 重建为可编辑文本框。
+5. PNG layer 或 full-context 非文字图按坐标放入 PPT，文字按 metadata 重建为可编辑文本框。
 6. `verify_pptx.py` 检查页面尺寸、图片数量、文本框数量、字体标记、换行标记和不应出现的发光/模糊效果。
 
 ## 安装
@@ -55,10 +55,10 @@ var ARTBOARD_INDEX = 0;
 var OUT_DIR = 'exports/artboard_001';
 ```
 
-也可以用环境变量覆盖：
+也可以用环境变量覆盖；`AI_TO_PPT_APPEARANCE_MODE` 可选 `auto`、`layers`、`full-context`：
 
 ```bash
-AI_TO_PPT_ARTBOARD_INDEX=0 AI_TO_PPT_OUT_DIR=exports/artboard_001 illustrator export_artboard.jsx
+AI_TO_PPT_ARTBOARD_INDEX=0 AI_TO_PPT_OUT_DIR=exports/artboard_001 AI_TO_PPT_APPEARANCE_MODE=auto illustrator export_artboard.jsx
 ```
 
 实际的 Illustrator 可执行文件路径因系统和安装位置不同，请使用你本机的 Illustrator 启动方式。
@@ -100,7 +100,7 @@ python scripts/build_pptx.py --manifest exports/artboard_001/manifest.json --out
 ## 已知限制
 
 - 转换结果依赖本机 Illustrator、PowerPoint/WPS 和已安装字体。
-- 复杂混合模式、透明度、蒙版、渐变网格、特效和部分嵌套剪切组可能需要人工检查。
+- 复杂混合模式、透明度、蒙版、渐变网格、特效和部分嵌套剪切组可能需要人工检查；默认 `auto` 模式会对复合渐变等复杂外观使用 full-context 非文字合成，视觉更稳，但非文字对象分层会减少。
 - 复杂字体、特殊效果和个别换行仍需人工检查；本工具不承诺所有 Illustrator 文件都能自动得到完全一致的结果。
 - PPT 字体渲染与 Illustrator 不完全一致，可能出现轻微换行或字距差异。
 - 竖排文字、路径文字、区域文字的极端形态可能需要额外适配。
@@ -109,7 +109,7 @@ python scripts/build_pptx.py --manifest exports/artboard_001/manifest.json --out
 ## 验收标准
 
 - PPT 页面尺寸与 Illustrator 画板尺寸一致。
-- PNG 层数与 `manifest.json` 中的 image 数一致。
+- PNG 层数与 `manifest.json` 中的 image 数一致；如果 `manifest.exportMode` 是 `full-context`，非文字 artwork 会是一张保真合成图。
 - 可编辑文本框数量与 `manifest.json` 中的 text 数一致。
 - 文字可以在 PowerPoint/WPS 中直接编辑。
 - 文本框无填充、无描边、无发光、无模糊。
