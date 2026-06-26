@@ -1,0 +1,97 @@
+# Customer and source materials
+*.ai
+*.ait
+*.eps
+*.pdf
+*.ppt
+*.pptx
+*.key
+*.psd
+*.indd
+*.sketch
+*.fig
+
+# Allow explicitly public, self-made demo assets.
+!examples/preview-source.png
+!examples/preview-output.png
+!examples/editable-demo.gif
+!examples/demo-output.pptx
+
+# Exported assets and generated output
+exports/
+output/
+dist/
+tmp/
+temp/
+cache/
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.tif
+*.tiff
+*.svg
+*.gif
+
+# Re-allow approved demo assets after generated media rules.
+!examples/preview-source.png
+!examples/preview-output.png
+!examples/editable-demo.gif
+!examples/demo-output.pptx
+
+# Font files
+*.ttf
+*.otf
+*.woff
+*.woff2
+*.eot
+*.ttc
+
+# Logs and local diagnostics
+*.log
+export_error.txt
+*_error.txt
+crash-*.txt
+
+# Secrets and local config
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Common private/customer project folders
+client/
+clients/
+customer/
+customers/
+customer-files/
+client-files/
+private/
+private-projects/
+source-files/
+raw-files/
+working/
+work/
+
+# Local Codex/agent configuration
+.codex/
+.agents/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# OS and editor noise
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
