@@ -52,6 +52,51 @@ def rgb_from_hex(value: str | None) -> RGBColor:
     return RGBColor(int(value[0:2], 16), int(value[2:4], 16), int(value[4:6], 16))
 
 
+def clean_hex(value: str | None) -> str:
+    value = (value or "FFFFFF").strip().lstrip("#").upper()
+    if len(value) != 6 or any(ch not in "0123456789ABCDEF" for ch in value):
+        return "FFFFFF"
+    return value
+
+
+def remove_text_fill(rpr) -> None:
+    fill_tags = {qn("a:solidFill"), qn("a:gradFill"), qn("a:noFill"), qn("a:pattFill"), qn("a:grpFill")}
+    for child in list(rpr):
+        if child.tag in fill_tags:
+            rpr.remove(child)
+
+
+def set_run_gradient_fill(run, gradient: dict[str, Any] | None) -> None:
+    if not gradient:
+        return
+    stops = gradient.get("stops") or []
+    if len(stops) < 2:
+        return
+
+    rpr = run._r.get_or_add_rPr()
+    remove_text_fill(rpr)
+
+    grad_fill = OxmlElement("a:gradFill")
+    grad_fill.set("rotWithShape", "1")
+    gs_lst = OxmlElement("a:gsLst")
+    for stop in stops:
+        gs = OxmlElement("a:gs")
+        position = int(float(stop.get("position", 0)))
+        gs.set("pos", str(max(0, min(100000, position))))
+        srgb = OxmlElement("a:srgbClr")
+        srgb.set("val", clean_hex(stop.get("color")))
+        gs.append(srgb)
+        gs_lst.append(gs)
+    grad_fill.append(gs_lst)
+
+    lin = OxmlElement("a:lin")
+    angle = float(gradient.get("angle") or 0)
+    lin.set("ang", str(int(round(angle * 60000))))
+    lin.set("scaled", "1")
+    grad_fill.append(lin)
+    rpr.append(grad_fill)
+
+
 def mapped_font(
     font_name: str | None,
     font_family: str | None = None,
@@ -168,6 +213,7 @@ def add_text(shape, item: dict[str, Any]) -> None:
         ppt_run.font.color.rgb = rgb_from_hex(run_data.get("fillColor") or item.get("fillColor"))
         apply_font_style(ppt_run, run_data.get("fontName"), run_data.get("fontStyle"))
         set_east_asian_font(ppt_run, font_name)
+        set_run_gradient_fill(ppt_run, item.get("textGradient"))
         wrote_any = True
 
     if not wrote_any:
@@ -179,6 +225,7 @@ def add_text(shape, item: dict[str, Any]) -> None:
         ppt_run.font.color.rgb = rgb_from_hex(item.get("fillColor"))
         apply_font_style(ppt_run, item.get("fontName"), item.get("fontStyle"))
         set_east_asian_font(ppt_run, font_name)
+        set_run_gradient_fill(ppt_run, item.get("textGradient"))
 
 
 def merged_text_bounds(item: dict[str, Any]) -> dict[str, float]:

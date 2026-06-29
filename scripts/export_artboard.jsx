@@ -12,6 +12,7 @@
 var ARTBOARD_INDEX = Number($.getenv('AI_TO_PPT_ARTBOARD_INDEX') || 0); // zero-based: first artboard = 0
 var OUT_DIR = $.getenv('AI_TO_PPT_OUT_DIR') || 'exports/artboard_001';
 var APPEARANCE_MODE = String($.getenv('AI_TO_PPT_APPEARANCE_MODE') || 'auto').toLowerCase(); // auto, layers, full-context
+var TEXT_GRADIENT_MODE = String($.getenv('AI_TO_PPT_TEXT_GRADIENT_MODE') || 'auto').toLowerCase(); // auto, off
 
 function resolvePath(pathValue) {
   var p = String(pathValue || '');
@@ -88,6 +89,43 @@ try {
     } catch(e) {}
     return 'FFFFFF';
   }
+  function gradientJson(source, stops) {
+    var parts = [];
+    for (var i=0;i<stops.length;i++) parts.push('{"position":' + stops[i].position + ',"color":' + q(stops[i].color) + '}');
+    return '{"type":"linear","angle":0,"source":' + q(source) + ',"stops":[' + parts.join(',') + ']}';
+  }
+  function hasLineBreak(s) { return /\r|\n/.test(String(s || '')); }
+  function autoTextGradient(tf, contents, size, color, ab) {
+    if (TEXT_GRADIENT_MODE == 'off') return '';
+    var text = String(contents || '').replace(/\s+/g, '');
+    if (!text || hasLineBreak(contents)) return '';
+    var vb = tf.visibleBounds;
+    var x = vb[0] - ab[0];
+    var y = ab[1] - vb[1];
+    var w = vb[2] - vb[0];
+    var artW = ab[2] - ab[0];
+    var artH = ab[1] - ab[3];
+    var isDarkPlaceholder = color == '40648E';
+    var isLarge = size >= 48;
+    var isTopTitle = isDarkPlaceholder && size >= 60 && y < artH * 0.12 && w > artW * 0.10;
+    var isRightHeading = isDarkPlaceholder && isLarge && x > artW * 0.58;
+    var isSectionNumber = isDarkPlaceholder && isLarge && x > artW * 0.55 && /^[0-9]+$/.test(text);
+    var isShortRightLabel = isDarkPlaceholder && isLarge && x > artW * 0.58 && text.length <= 8 && y < artH * 0.25;
+    if (isTopTitle || (isShortRightLabel && !isSectionNumber)) {
+      return gradientJson('style-auto-cyan-title', [
+        {position:0, color:'1D3D70'},
+        {position:50000, color:'C3FFFF'},
+        {position:100000, color:'1D3D70'}
+      ]);
+    }
+    if (isRightHeading || isSectionNumber) {
+      return gradientJson('style-auto-orange-heading', [
+        {position:0, color:'FBB03B'},
+        {position:100000, color:'FFFFFF'}
+      ]);
+    }
+    return '';
+  }
   function fontInfo(ca) { var fontName=''; var fontFamily=''; var fontFullName=''; var fontStyle=''; try { fontName = ca.textFont.name || ''; fontFamily = ca.textFont.family || ''; fontFullName = ca.textFont.fullName || ''; fontStyle = ca.textFont.style || ''; } catch(e) {} return { name: fontName, family: fontFamily, fullName: fontFullName, style: fontStyle }; }
   function attrsForRange(r) { var ca = r.characterAttributes; var fi = fontInfo(ca); var size = 24; try { size = Number(ca.size || 24); } catch(e) {} var color = 'FFFFFF'; try { color = colorToHex(ca.fillColor); } catch(e2) {} return { fontName: fi.name, fontFamily: fi.family, fontFullName: fi.fullName, fontStyle: fi.style, size: size, fillColor: color }; }
   function attrKey(a) { return a.fontName + '|' + a.fontFamily + '|' + a.fontFullName + '|' + a.fontStyle + '|' + Math.round(a.size*100)/100 + '|' + a.fillColor; }
@@ -131,6 +169,7 @@ try {
     var size = 24; try { size = Number(ca.size || 24); } catch(e) {}
     var leading = 0; try { leading = Number(ca.leading || 0); } catch(e2) {}
     var color = 'FFFFFF'; try { color = colorToHex(ca.fillColor); } catch(e3) {}
+    var textGradient = autoTextGradient(tf, tf.contents, size, color, ab);
     return '{"index":' + idx +
       ',"name":' + q(tf.name) +
       ',"kind":' + q(String(tf.kind)) +
@@ -146,6 +185,7 @@ try {
       ',"orientation":' + q(String(tf.orientation)) +
       ',"visibleBounds":' + normBounds(vb, ab) +
       ',"geometricBounds":' + normBounds(gb, ab) +
+      (textGradient ? ',"textGradient":' + textGradient : '') +
       ',"runs":' + runsJson(tf) + '}';
   }
   if (app.documents.length < 1) throw new Error('No active document.');
@@ -203,7 +243,7 @@ try {
   for (var r=0;r<allItems.length;r++) { try { allItems[r].item.hidden=allItems[r].hidden; allItems[r].item.locked=allItems[r].locked; } catch(e8) {} }
   for (var lr=0;lr<layers.length;lr++) { try { layers[lr].layer.visible=layers[lr].visible; layers[lr].layer.locked=layers[lr].locked; } catch(e9) {} }
 
-  var json = '{"document":' + q(doc.name) + ',"artboardIndex":' + (ARTBOARD_INDEX+1) + ',"artboardRect":[' + ab.join(',') + '],"appearanceMode":' + q(APPEARANCE_MODE) + ',"exportMode":' + q(exportMode) + ',"complexAppearanceDetected":' + (complexDetected?'true':'false') + ',"imageCandidateCount":' + candidates.length + ',"exportedImageCount":' + imageMeta.length + ',"textCount":' + texts.length + ',"images":[' + imageMeta.join(',') + '],"texts":[' + texts.join(',') + ']}';
+  var json = '{"document":' + q(doc.name) + ',"artboardIndex":' + (ARTBOARD_INDEX+1) + ',"artboardRect":[' + ab.join(',') + '],"appearanceMode":' + q(APPEARANCE_MODE) + ',"textGradientMode":' + q(TEXT_GRADIENT_MODE) + ',"exportMode":' + q(exportMode) + ',"complexAppearanceDetected":' + (complexDetected?'true':'false') + ',"imageCandidateCount":' + candidates.length + ',"exportedImageCount":' + imageMeta.length + ',"textCount":' + texts.length + ',"images":[' + imageMeta.join(',') + '],"texts":[' + texts.join(',') + ']}';
   var f = new File(OUT_DIR + '/manifest.json'); f.encoding='UTF-8'; f.open('w'); f.write(json); f.close();
 } catch (err) {
   var fallback = Folder.temp.fsName.replace(/\\/g, '/') + '/ai_to_ppt_export_error.txt';

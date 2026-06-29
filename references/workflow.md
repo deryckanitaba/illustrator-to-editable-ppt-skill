@@ -30,9 +30,10 @@ Complex fonts, special effects, and individual line wrapping differences still r
 var ARTBOARD_INDEX = 0;
 var OUT_DIR = 'exports/artboard_001';
 var APPEARANCE_MODE = 'auto'; // auto, layers, full-context
+var TEXT_GRADIENT_MODE = 'auto'; // auto, off
 ```
 
-`ARTBOARD_INDEX` is zero-based. The first artboard is `0`. `APPEARANCE_MODE=auto` detects compound gradients and other complex appearances and exports non-text artwork in full context when needed; use `layers` to force per-object PNG layers, or `full-context` to force visual-preservation mode.
+`ARTBOARD_INDEX` is zero-based. The first artboard is `0`. `APPEARANCE_MODE=auto` detects compound gradients and other complex appearances and exports non-text artwork in full context when needed; use `layers` to force per-object PNG layers, or `full-context` to force visual-preservation mode. `TEXT_GRADIENT_MODE=auto` marks Pathfinder/compound-shape gradient lettering so the PPT builder can use native text gradients instead of flat solid text.
 
 5. Run the JSX with Illustrator using the launch method for your operating system and Illustrator installation.
 6. If Illustrator asks whether to allow the script, click continue.
@@ -93,6 +94,7 @@ For each Illustrator text frame, export:
 - font name, family, full name, and style
 - font size
 - fill color
+- optional native PPT text-gradient metadata for Pathfinder/compound-shape gradient lettering
 - leading
 - paragraph justification
 - orientation
@@ -101,7 +103,7 @@ For each Illustrator text frame, export:
 When building the PPTX:
 
 - Use geometric and visible bounds to create a slightly padded text box.
-- Recreate text as PPT runs so mixed fonts, sizes, and colors can be preserved.
+- Recreate text as PPT runs so mixed fonts, sizes, colors, and marked gradient text fills can be preserved.
 - Prefer `fontFamily` and `fontFullName` over raw PostScript names.
 - Use an optional font-map JSON only for fonts that PowerPoint/WPS cannot resolve.
 - Map center and right alignment from Illustrator into PPT paragraph alignment.
@@ -114,7 +116,7 @@ When building the PPTX:
 - PPT page size matches the Illustrator artboard.
 - PNG count matches `manifest.images`.
 - Editable text box count matches `manifest.texts`.
-- Text is editable in PowerPoint or WPS.
+- Text is editable in PowerPoint or WPS, including marked gradient text created as native PPT text fill rather than rasterized artwork.
 - Text boxes have no visible fill, line, glow, blur, or background artifact.
 - Text wrapping is enabled.
 - Center and right alignment are preserved.

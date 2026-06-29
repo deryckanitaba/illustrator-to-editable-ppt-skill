@@ -74,6 +74,7 @@ def main() -> int:
         "blur": xml.count("<a:blur"),
         "wrap_square": xml.count('wrap="square"'),
         "wrap_none": xml.count('wrap="none"'),
+        "gradient_fill": xml.count("<a:gradFill"),
         "center_alignment": xml.count('algn="ctr"'),
         "right_alignment": xml.count('algn="r"'),
     }
