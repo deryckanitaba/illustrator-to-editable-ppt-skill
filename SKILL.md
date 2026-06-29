@@ -12,8 +12,8 @@ Use this skill to convert Adobe Illustrator `.ai` artboards into layered, editab
 - Use the active Illustrator document when possible. The exporter JSX runs inside Illustrator and reads the current document.
 - Expect Illustrator to show a script security prompt. Pause and ask the user to click **Continue** before waiting for output.
 - Preserve the Illustrator artboard size. Do not force the result into a default 16:9 PowerPoint template.
-- Export non-text objects as transparent PNG layers from Illustrator. In `AI_TO_PPT_APPEARANCE_MODE=auto`, preserve complex compound-gradient, clipping, plugin, or non-normal blend appearances by exporting the non-text artwork in full context as a single transparent PNG while keeping text editable. Do not blur, repair, or inpaint text out of a full-page screenshot.
-- Rebuild text as editable PPT text boxes. Do not rasterize text unless the user explicitly accepts it. When Illustrator text is paired with Pathfinder/compound-shape gradient lettering, preserve editability by applying a native PowerPoint text gradient (`a:gradFill`) to the PPT text run instead of overlaying a flat solid text color.
+- Export non-text objects as transparent PNG layers from Illustrator. Do not collapse the full non-text artwork into a single screenshot; preserve layer separation even when design elements use compound gradients, clipping, plugin items, or blend modes.
+- Rebuild text as editable PPT text boxes. Do not rasterize text unless the user explicitly accepts it. When Illustrator text itself has a gradient, or a nearby Pathfinder/compound-shape gradient outline reliably matches the text bounds, preserve editability by applying a native PowerPoint text gradient (`a:gradFill`) to the PPT text run.
 - Preserve fonts per text run from Illustrator metadata. Prefer Illustrator `fontFamily` / `fontFullName`; use aliases only for PostScript names that PowerPoint or WPS cannot resolve directly.
 - Manually check complex fonts, Pathfinder/compound-shape gradient text, special effects, and individual line wrapping differences. Do not promise perfect conversion for every Illustrator file.
 - Keep text boxes with no fill, no line, no glow, and no blur.
@@ -27,7 +27,6 @@ Use this skill to convert Adobe Illustrator `.ai` artboards into layered, editab
 3. Configure the export:
    - edit `ARTBOARD_INDEX` and `OUT_DIR` at the top of the JSX, or
    - set `AI_TO_PPT_ARTBOARD_INDEX` and `AI_TO_PPT_OUT_DIR` environment variables before launching Illustrator.
-   - optionally set `AI_TO_PPT_APPEARANCE_MODE` to `auto` (default), `layers`, or `full-context`.
    - optionally set `AI_TO_PPT_TEXT_GRADIENT_MODE` to `auto` (default) or `off`.
 4. Run the JSX through Illustrator.
 5. If Illustrator asks for script permission, tell the user to click **Continue** and wait.
@@ -47,7 +46,7 @@ python scripts/verify_pptx.py output/artboard_001.pptx --manifest exports/artboa
 
 ## Script Roles
 
-- `scripts/export_artboard.jsx`: Illustrator JSX exporter. Produces transparent PNG layer exports or a full-context non-text PNG for complex appearances, plus `manifest.json` with text metadata/runs and optional `textGradient` metadata.
+- `scripts/export_artboard.jsx`: Illustrator JSX exporter. Produces transparent PNG layer exports plus `manifest.json` with text metadata/runs and optional `textGradient` metadata.
 - `scripts/build_pptx.py`: Builds PPTX from the manifest, including native PPT text gradients for marked runs.
 - `scripts/verify_pptx.py`: Checks slide size, picture/text counts, optional font markers, wrap/alignment markers, and absence of glow/blur.
 

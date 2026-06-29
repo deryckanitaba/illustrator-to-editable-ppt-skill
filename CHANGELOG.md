@@ -2,9 +2,9 @@
 
 ## Unreleased
 
-- Added automatic complex-appearance preservation for compound-gradient, clipping, plugin, and non-normal blend artwork via full-context non-text PNG export while keeping text editable.
-- Added `AI_TO_PPT_APPEARANCE_MODE` with `auto`, `layers`, and `full-context` modes.
-- Skipped zero-area image candidates to avoid blank full-slide PNG artifacts.
+- Removed automatic full-page non-text compositing so complex design artwork remains exported as separate PNG layers.
+- Removed the public `AI_TO_PPT_APPEARANCE_MODE` mode switch.
+- Kept native PPT text gradients limited to direct text gradients or reliably matched Pathfinder/compound-shape text outlines.
 
 ## v0.1.0 - 2026-06-26
 

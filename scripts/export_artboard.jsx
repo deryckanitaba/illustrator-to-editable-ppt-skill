@@ -11,7 +11,6 @@
 (function () {
 var ARTBOARD_INDEX = Number($.getenv('AI_TO_PPT_ARTBOARD_INDEX') || 0); // zero-based: first artboard = 0
 var OUT_DIR = $.getenv('AI_TO_PPT_OUT_DIR') || 'exports/artboard_001';
-var APPEARANCE_MODE = String($.getenv('AI_TO_PPT_APPEARANCE_MODE') || 'auto').toLowerCase(); // auto, layers, full-context
 var TEXT_GRADIENT_MODE = String($.getenv('AI_TO_PPT_TEXT_GRADIENT_MODE') || 'auto').toLowerCase(); // auto, off
 
 function resolvePath(pathValue) {
@@ -30,6 +29,10 @@ try {
   function intersects(b, ab) { return !(b[2] <= ab[0] || b[0] >= ab[2] || b[3] >= ab[1] || b[1] <= ab[3]); }
   function clampBounds(b, ab) { return [Math.max(b[0], ab[0]), Math.min(b[1], ab[1]), Math.min(b[2], ab[2]), Math.max(b[3], ab[3])]; }
   function usableBounds(b) { return b && (b[2] - b[0]) > 0.5 && (b[1] - b[3]) > 0.5; }
+  function boundsWidth(b) { return b[2] - b[0]; }
+  function boundsHeight(b) { return b[1] - b[3]; }
+  function boundsCenterX(b) { return (b[0] + b[2]) / 2; }
+  function boundsCenterY(b) { return (b[1] + b[3]) / 2; }
   function normBounds(b, ab) { return '{"left":' + b[0] + ',"top":' + b[1] + ',"right":' + b[2] + ',"bottom":' + b[3] + ',"x":' + (b[0]-ab[0]) + ',"y":' + (ab[1]-b[1]) + ',"w":' + (b[2]-b[0]) + ',"h":' + (b[1]-b[3]) + '}'; }
   function childCollections(item) {
     var collections = [];
@@ -54,26 +57,15 @@ try {
   }
   function topLevelItems(doc) { var out=[]; for (var i=0;i<doc.pageItems.length;i++) if (doc.pageItems[i].parent && doc.pageItems[i].parent.typename == 'Layer') out.push(doc.pageItems[i]); return out; }
   function colorType(c) { try { return c ? String(c.typename) : ''; } catch(e) { return ''; } }
+  function selfGradientColor(item) {
+    try { if (item.filled && colorType(item.fillColor) == 'GradientColor') return {color:item.fillColor, source:'fill'}; } catch(e) {}
+    try { if (item.stroked && colorType(item.strokeColor) == 'GradientColor') return {color:item.strokeColor, source:'stroke'}; } catch(e2) {}
+    return null;
+  }
   function itemUsesGradient(item) {
-    try { if (item.filled && colorType(item.fillColor) == 'GradientColor') return true; } catch(e) {}
-    try { if (item.stroked && colorType(item.strokeColor) == 'GradientColor') return true; } catch(e2) {}
+    if (selfGradientColor(item)) return true;
     var collections = childCollections(item);
     for (var c=0;c<collections.length;c++) for (var i=0;i<collections[c].length;i++) if (itemUsesGradient(collections[c][i])) return true;
-    return false;
-  }
-  function nonNormalBlend(item) {
-    try {
-      var bm = String(item.blendingMode || '');
-      return bm && bm != 'BlendModes.NORMAL' && bm != 'NORMAL';
-    } catch(e) { return false; }
-  }
-  function complexAppearance(item) {
-    if (item.typename == 'PluginItem') return true;
-    if (item.typename == 'CompoundPathItem' && itemUsesGradient(item)) return true;
-    if (itemUsesGradient(item) && nonNormalBlend(item)) return true;
-    try { if (item.clipped && itemUsesGradient(item)) return true; } catch(e) {}
-    var collections = childCollections(item);
-    for (var c=0;c<collections.length;c++) for (var i=0;i<collections[c].length;i++) if (complexAppearance(collections[c][i])) return true;
     return false;
   }
   function hex(n) { n=Math.max(0,Math.min(255,Math.round(n))); var s=n.toString(16).toUpperCase(); return s.length<2?'0'+s:s; }
@@ -94,37 +86,96 @@ try {
     for (var i=0;i<stops.length;i++) parts.push('{"position":' + stops[i].position + ',"color":' + q(stops[i].color) + '}');
     return '{"type":"linear","angle":0,"source":' + q(source) + ',"stops":[' + parts.join(',') + ']}';
   }
+  function gradientFromColor(c, source) {
+    try {
+      if (!c || c.typename != 'GradientColor' || !c.gradient || !c.gradient.gradientStops) return '';
+      var stops = [];
+      for (var i=0;i<c.gradient.gradientStops.length;i++) {
+        var stop = c.gradient.gradientStops[i];
+        stops.push({position:Math.round(Number(stop.rampPoint || 0) * 1000), color:colorToHex(stop.color)});
+      }
+      if (stops.length < 2) return '';
+      return gradientJson(source, stops);
+    } catch(e) { return ''; }
+  }
+  function gradientFromItem(item, source) {
+    var g = selfGradientColor(item);
+    if (!g) return '';
+    return gradientFromColor(g.color, source + '-' + g.source);
+  }
+  function collectGradientLeaves(item, ab, out) {
+    if (!item || item.typename == 'TextFrame') return;
+    try {
+      var g = gradientFromItem(item, 'matched-outline');
+      if (g) {
+        var b = item.visibleBounds;
+        var cb = clampBounds(b, ab);
+        if (intersects(b, ab) && usableBounds(cb)) out.push({item:item, bounds:cb, gradient:g});
+      }
+    } catch(e) {}
+    var collections = childCollections(item);
+    for (var c=0;c<collections.length;c++) for (var i=0;i<collections[c].length;i++) collectGradientLeaves(collections[c][i], ab, out);
+  }
   function hasLineBreak(s) { return /\r|\n/.test(String(s || '')); }
-  function autoTextGradient(tf, contents, size, color, ab) {
+  function directTextGradient(tf) {
     if (TEXT_GRADIENT_MODE == 'off') return '';
-    var text = String(contents || '').replace(/\s+/g, '');
-    if (!text || hasLineBreak(contents)) return '';
-    var vb = tf.visibleBounds;
-    var x = vb[0] - ab[0];
-    var y = ab[1] - vb[1];
-    var w = vb[2] - vb[0];
-    var artW = ab[2] - ab[0];
-    var artH = ab[1] - ab[3];
-    var isDarkPlaceholder = color == '40648E';
-    var isLarge = size >= 48;
-    var isTopTitle = isDarkPlaceholder && size >= 60 && y < artH * 0.12 && w > artW * 0.10;
-    var isRightHeading = isDarkPlaceholder && isLarge && x > artW * 0.58;
-    var isSectionNumber = isDarkPlaceholder && isLarge && x > artW * 0.55 && /^[0-9]+$/.test(text);
-    var isShortRightLabel = isDarkPlaceholder && isLarge && x > artW * 0.58 && text.length <= 8 && y < artH * 0.25;
-    if (isTopTitle || (isShortRightLabel && !isSectionNumber)) {
-      return gradientJson('style-auto-cyan-title', [
-        {position:0, color:'1D3D70'},
-        {position:50000, color:'C3FFFF'},
-        {position:100000, color:'1D3D70'}
-      ]);
+    try { return gradientFromColor(tf.textRange.characterAttributes.fillColor, 'textframe-fill'); } catch(e) { return ''; }
+  }
+  function matchScore(textBounds, candidateBounds, textValue) {
+    var tw = boundsWidth(textBounds), th = boundsHeight(textBounds);
+    var cw = boundsWidth(candidateBounds), ch = boundsHeight(candidateBounds);
+    if (tw <= 0 || th <= 0 || cw <= 0 || ch <= 0) return -1;
+    var compactText = String(textValue || '').replace(/\s+/g, '');
+    if (!compactText || hasLineBreak(textValue)) return -1;
+    var widthRatio = cw / tw;
+    var heightRatio = ch / th;
+    var areaRatio = (cw * ch) / (tw * th);
+    var minRatio = compactText.length <= 2 ? 0.25 : 0.45;
+    var maxRatio = compactText.length <= 2 ? 2.25 : 1.65;
+    if (widthRatio < minRatio || widthRatio > maxRatio) return -1;
+    if (heightRatio < 0.45 || heightRatio > 1.75) return -1;
+    if (areaRatio < 0.12 || areaRatio > 2.8) return -1;
+    var dx = Math.abs(boundsCenterX(textBounds) - boundsCenterX(candidateBounds));
+    var dy = Math.abs(boundsCenterY(textBounds) - boundsCenterY(candidateBounds));
+    if (dx > Math.max(tw, cw) * 0.32) return -1;
+    if (dy > Math.max(th, ch) * 0.32) return -1;
+    return dx + dy + Math.abs(1 - widthRatio) * tw + Math.abs(1 - heightRatio) * th;
+  }
+  function bestMatchedGradient(tf, gradients) {
+    if (TEXT_GRADIENT_MODE == 'off') return null;
+    var best = null;
+    var bestScore = 999999999;
+    var textBoundsList = [];
+    try { textBoundsList.push(tf.visibleBounds); } catch(e) {}
+    try { textBoundsList.push(tf.geometricBounds); } catch(e2) {}
+    for (var b=0;b<textBoundsList.length;b++) {
+      var tb = textBoundsList[b];
+      for (var i=0;i<gradients.length;i++) {
+        var score = matchScore(tb, gradients[i].bounds, tf.contents);
+        if (score >= 0 && score < bestScore) { bestScore = score; best = gradients[i]; }
+      }
     }
-    if (isRightHeading || isSectionNumber) {
-      return gradientJson('style-auto-orange-heading', [
-        {position:0, color:'FBB03B'},
-        {position:100000, color:'FFFFFF'}
-      ]);
+    return best;
+  }
+  function isMatchedItem(item, matchedItems) {
+    for (var i=0;i<matchedItems.length;i++) if (item === matchedItems[i]) return true;
+    return false;
+  }
+  function allNonTextArtworkMatched(item, matchedItems) {
+    if (!item || item.typename == 'TextFrame') return true;
+    if (isMatchedItem(item, matchedItems)) return true;
+    var collections = childCollections(item);
+    if (!collections.length) return false;
+    var sawNonText = false;
+    for (var c=0;c<collections.length;c++) {
+      for (var i=0;i<collections[c].length;i++) {
+        if (hasNonText(collections[c][i])) {
+          sawNonText = true;
+          if (!allNonTextArtworkMatched(collections[c][i], matchedItems)) return false;
+        }
+      }
     }
-    return '';
+    return sawNonText;
   }
   function fontInfo(ca) { var fontName=''; var fontFamily=''; var fontFullName=''; var fontStyle=''; try { fontName = ca.textFont.name || ''; fontFamily = ca.textFont.family || ''; fontFullName = ca.textFont.fullName || ''; fontStyle = ca.textFont.style || ''; } catch(e) {} return { name: fontName, family: fontFamily, fullName: fontFullName, style: fontStyle }; }
   function attrsForRange(r) { var ca = r.characterAttributes; var fi = fontInfo(ca); var size = 24; try { size = Number(ca.size || 24); } catch(e) {} var color = 'FFFFFF'; try { color = colorToHex(ca.fillColor); } catch(e2) {} return { fontName: fi.name, fontFamily: fi.family, fontFullName: fi.fullName, fontStyle: fi.style, size: size, fillColor: color }; }
@@ -159,7 +210,7 @@ try {
     if (curAttrs !== null) runs.push(runObject(curText, curAttrs));
     return '[' + runs.join(',') + ']';
   }
-  function textJson(tf, idx, ab) {
+  function textJson(tf, idx, ab, textGradient) {
     var vb = tf.visibleBounds;
     var gb = tf.geometricBounds;
     var tr = tf.textRange;
@@ -169,7 +220,6 @@ try {
     var size = 24; try { size = Number(ca.size || 24); } catch(e) {}
     var leading = 0; try { leading = Number(ca.leading || 0); } catch(e2) {}
     var color = 'FFFFFF'; try { color = colorToHex(ca.fillColor); } catch(e3) {}
-    var textGradient = autoTextGradient(tf, tf.contents, size, color, ab);
     return '{"index":' + idx +
       ',"name":' + q(tf.name) +
       ',"kind":' + q(String(tf.kind)) +
@@ -197,18 +247,43 @@ try {
   var imgFolder = ensureFolder(OUT_DIR + '/images');
 
   var tops = topLevelItems(doc);
+  var gradientLeaves = [];
+  collectGradientLeaves(doc, ab, gradientLeaves);
+
+  var textGradients = {};
+  var matchedGradientItems = [];
+  var matchedGradientCount = 0;
+  var directGradientCount = 0;
+  for (var tg=0;tg<doc.textFrames.length;tg++) {
+    try {
+      if (!(intersects(doc.textFrames[tg].visibleBounds, ab) || intersects(doc.textFrames[tg].geometricBounds, ab))) continue;
+      var direct = directTextGradient(doc.textFrames[tg]);
+      if (direct) { textGradients[tg] = direct; directGradientCount++; continue; }
+      var match = bestMatchedGradient(doc.textFrames[tg], gradientLeaves);
+      if (match) {
+        textGradients[tg] = match.gradient;
+        matchedGradientItems.push(match.item);
+        matchedGradientCount++;
+      }
+    } catch(e) {}
+  }
+
   var candidates = [];
+  var skippedTextGradientArtworkCount = 0;
   for (var i=0;i<tops.length;i++) {
     try {
       var b=tops[i].visibleBounds;
       var cb = clampBounds(b,ab);
-      if (intersects(b, ab) && usableBounds(cb) && hasNonText(tops[i])) candidates.push({item:tops[i], index:i, bounds:cb, hasText:hasText(tops[i]), complex:complexAppearance(tops[i])});
+      if (intersects(b, ab) && usableBounds(cb) && hasNonText(tops[i])) {
+        if (allNonTextArtworkMatched(tops[i], matchedGradientItems)) skippedTextGradientArtworkCount++;
+        else candidates.push({item:tops[i], index:i, bounds:cb, hasText:hasText(tops[i])});
+      }
     } catch(e) {}
   }
 
   var texts = [];
   for (var t=0;t<doc.textFrames.length;t++) {
-    try { if (intersects(doc.textFrames[t].visibleBounds, ab) || intersects(doc.textFrames[t].geometricBounds, ab)) texts.push(textJson(doc.textFrames[t], t, ab)); } catch(e2) {}
+    try { if (intersects(doc.textFrames[t].visibleBounds, ab) || intersects(doc.textFrames[t].geometricBounds, ab)) texts.push(textJson(doc.textFrames[t], t, ab, textGradients[t] || '')); } catch(e2) {}
   }
 
   var allItems = []; for (var a=0;a<doc.pageItems.length;a++) allItems.push({item:doc.pageItems[a], hidden:doc.pageItems[a].hidden, locked:doc.pageItems[a].locked});
@@ -218,32 +293,22 @@ try {
 
   var imageMeta = [];
   var opts = new ImageCaptureOptions(); opts.resolution = 72; opts.antiAliasing = true; opts.transparency = true;
-  var complexDetected = false;
-  for (var cd=0;cd<candidates.length;cd++) if (candidates[cd].complex) complexDetected = true;
-  var exportMode = (APPEARANCE_MODE == 'full-context' || (APPEARANCE_MODE == 'auto' && complexDetected)) ? 'full-context' : 'layers';
+  var exportMode = 'layers';
 
-  if (exportMode == 'full-context') {
-    for (var tx=0;tx<doc.textFrames.length;tx++) { try { doc.textFrames[tx].hidden = true; } catch(e7) {} }
-    var fullFileName = 'artwork_full_context.png';
-    var fullFile = new File(imgFolder.fsName + '/' + fullFileName);
-    doc.imageCapture(fullFile, ab, opts);
-    imageMeta.push('{"file":' + q('images/' + fullFileName) + ',"sourceIndex":-1,"typename":"FullContextNonText","hasText":false,"fullContext":true,"bounds":' + normBounds(ab, ab) + '}');
-  } else {
-    for (var c=0;c<candidates.length;c++) {
-      for (var h=0;h<tops.length;h++) { try { tops[h].hidden = true; } catch(e5) {} }
-      try { candidates[c].item.hidden = false; } catch(e6) {}
-      for (var tx2=0;tx2<doc.textFrames.length;tx2++) { try { doc.textFrames[tx2].hidden = true; } catch(e7b) {} }
-      var fileName = 'layer_' + ('000' + (c+1)).slice(-3) + '.png';
-      var file = new File(imgFolder.fsName + '/' + fileName);
-      doc.imageCapture(file, candidates[c].bounds, opts);
-      imageMeta.push('{"file":' + q('images/' + fileName) + ',"sourceIndex":' + candidates[c].index + ',"typename":' + q(candidates[c].item.typename) + ',"hasText":' + (candidates[c].hasText?'true':'false') + ',"complexAppearance":' + (candidates[c].complex?'true':'false') + ',"bounds":' + normBounds(candidates[c].bounds, ab) + '}');
-    }
+  for (var c=0;c<candidates.length;c++) {
+    for (var h=0;h<tops.length;h++) { try { tops[h].hidden = true; } catch(e5) {} }
+    try { candidates[c].item.hidden = false; } catch(e6) {}
+    for (var tx2=0;tx2<doc.textFrames.length;tx2++) { try { doc.textFrames[tx2].hidden = true; } catch(e7b) {} }
+    var fileName = 'layer_' + ('000' + (c+1)).slice(-3) + '.png';
+    var file = new File(imgFolder.fsName + '/' + fileName);
+    doc.imageCapture(file, candidates[c].bounds, opts);
+    imageMeta.push('{"file":' + q('images/' + fileName) + ',"sourceIndex":' + candidates[c].index + ',"typename":' + q(candidates[c].item.typename) + ',"hasText":' + (candidates[c].hasText?'true':'false') + ',"bounds":' + normBounds(candidates[c].bounds, ab) + '}');
   }
 
   for (var r=0;r<allItems.length;r++) { try { allItems[r].item.hidden=allItems[r].hidden; allItems[r].item.locked=allItems[r].locked; } catch(e8) {} }
   for (var lr=0;lr<layers.length;lr++) { try { layers[lr].layer.visible=layers[lr].visible; layers[lr].layer.locked=layers[lr].locked; } catch(e9) {} }
 
-  var json = '{"document":' + q(doc.name) + ',"artboardIndex":' + (ARTBOARD_INDEX+1) + ',"artboardRect":[' + ab.join(',') + '],"appearanceMode":' + q(APPEARANCE_MODE) + ',"textGradientMode":' + q(TEXT_GRADIENT_MODE) + ',"exportMode":' + q(exportMode) + ',"complexAppearanceDetected":' + (complexDetected?'true':'false') + ',"imageCandidateCount":' + candidates.length + ',"exportedImageCount":' + imageMeta.length + ',"textCount":' + texts.length + ',"images":[' + imageMeta.join(',') + '],"texts":[' + texts.join(',') + ']}';
+  var json = '{"document":' + q(doc.name) + ',"artboardIndex":' + (ARTBOARD_INDEX+1) + ',"artboardRect":[' + ab.join(',') + '],"textGradientMode":' + q(TEXT_GRADIENT_MODE) + ',"exportMode":' + q(exportMode) + ',"imageCandidateCount":' + candidates.length + ',"exportedImageCount":' + imageMeta.length + ',"textCount":' + texts.length + ',"textGradientDirectCount":' + directGradientCount + ',"textGradientMatchedCount":' + matchedGradientCount + ',"skippedTextGradientArtworkCount":' + skippedTextGradientArtworkCount + ',"images":[' + imageMeta.join(',') + '],"texts":[' + texts.join(',') + ']}';
   var f = new File(OUT_DIR + '/manifest.json'); f.encoding='UTF-8'; f.open('w'); f.write(json); f.close();
 } catch (err) {
   var fallback = Folder.temp.fsName.replace(/\\/g, '/') + '/ai_to_ppt_export_error.txt';
