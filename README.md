@@ -1,134 +1,173 @@
-# Illustrator 转可编辑 PPT Skill
+<img width="1797" height="986" alt="AI 截图" src="https://github.com/user-attachments/assets/a87176bd-b5a5-47b9-8223-fa053485bc77" /># Illustrator to Editable PPT Skill
 
-这是一个面向 Codex 用户、设计师和 PPT 从业者的 Adobe Illustrator `.ai` 画板转 PowerPoint `.pptx` skill。这里的 `.ai` 指 Illustrator 文件格式，不指人工智能。它的目标不是把页面截图塞进 PPT，而是尽量把页面拆成可维护的 PPT 结构：非文字元素以透明 PNG 分层保留，文字重建为可编辑 PPT 文本框，并尽量保持页面尺寸、位置、字体、字号、颜色、换行和对齐方式一致。
+> Convert Adobe Illustrator `.ai` artboards into editable PowerPoint `.pptx` slides.
+> 图形以独立透明 PNG 图层保留，文字重建为 PowerPoint 原生文本框。
 
-## 解决的问题
+<img width="1734" height="912" alt="屏幕录制 2026-06-29 " src="https://github.com/user-attachments/assets/e7107a8a-ffaa-4722-811c-20b8a005d402" />
 
-设计稿常常在 Illustrator 中完成，但最终交付需要 PowerPoint 或 WPS。直接截图会丢失可编辑文字，手工重排又耗时且容易错位。本 skill 提供一套半自动流程，让 Illustrator 画板转换为更接近源文件的可编辑 PPT 页面。
+![Editable PowerPoint demo](assets/demo/03-edit-text.gif)
 
-## 适用场景
+**这不是普通 PDF 转 PPT。**
 
-- Illustrator 画板需要交付为 PPT 或 WPS 演示文稿。
-- 页面里有大量装饰图形、图标、背景和可编辑文字。
-- 希望保留画板真实尺寸，而不是套用默认 16:9 模板。
-- 需要后续在 PowerPoint/WPS 中修改文字内容、字体、颜色或排版。
-- 需要批量处理多个 Illustrator 画板，并逐页人工验收。
+它从 Adobe Illustrator `.ai` 源文件读取画板、文字和对象信息，目标不是让 PPT “能打开”，而是尽量让它在后续修改时仍然保持正常的文字结构、版式关系和视觉效果。
 
-## 工作原理
+---
 
-1. `export_artboard.jsx` 在 Illustrator 中读取当前活动文档和目标画板。
-2. 非文字对象按顶层对象或组导出为透明 PNG layer；即使检测到复合渐变、剪切、PluginItem 或混合模式，也不再把整页非文字 artwork 合成为一张图。
-3. 文字对象不导出为图片，而是记录内容、位置、字体、字号、颜色、段落对齐、字符 run，以及必要时的 PPT 原生文字渐变元数据。
-4. `build_pptx.py` 根据 `manifest.json` 创建 PPT，按 Illustrator 画板尺寸设置页面大小。
-5. PNG layer 按坐标放入 PPT，文字按 metadata 重建为可编辑文本框；只有与文字 bounds 可靠匹配的路径查找器/复合形状渐变字才会转换为 PPT 原生文字渐变。
-6. `verify_pptx.py` 检查页面尺寸、图片数量、文本框数量、字体标记、换行标记和不应出现的发光/模糊效果。
+## 为什么需要这个工作流
 
-## 安装
+普通 PDF 转 PPT 的结果，很多时候只是“看起来有文本框”。
 
-准备环境：
+常见问题包括：
 
-- Adobe Illustrator，可运行 JSX 脚本。
-- Python 3.10 或更高版本。
-- Python 依赖：
+* 背景和设计元素与原稿存在明显差异；
+* 文字经过图像识别后重新生成，字体、字号、换行和对齐容易偏移；
+* 一段文字被拆成很多零散文本框，严重时甚至一字一框；
+* 页面尺寸被强制套进默认 16:9，原稿比例发生变化；
+* 改一行文字后，整页版式开始失控。
 
-```bash
-pip install python-pptx
+这个 skill 处理的是另一件事：
+
+> 让 Illustrator 画板尽量变成一份后续仍然敢改的 PPT。
+
+---
+
+## 效果示例
+
+<table>
+<tr>
+<td width="50%" align="center">
+
+### Illustrator 源文件
+
+<img width="1797" height="986" alt="AI 截图" src="https://github.com/user-attachments/assets/2bc7f2e4-151a-4c84-8156-1d5cd1d0b5f1" />
+
+<img src="assets/demo/01-ai-source.png" alt="Illustrator source artboard">
+
+</td>
+<td width="50%" align="center">
+
+### 生成后的可编辑 PPT
+
+<img src="assets/demo/02-ppt-editable-text.png" alt="Editable text in PowerPoint or WPS">
+
+</td>
+</tr>
+</table>
+
+上图中的 PPT 标题可以直接选中、改字、调整字体和字号，而不是一张整页截图或 OCR 拆分后的零散文本。
+
+---
+
+## 它保留了什么
+
+| Illustrator 内容   | PPT 输出方式          | 后续可操作性          |
+| ---------------- | ----------------- | --------------- |
+| 普通文字 `TextFrame` | PowerPoint 原生文本框  | 可改字、改字体、改字号、改颜色 |
+| 图片、图标、装饰图形       | 独立透明 PNG 图层       | 可移动、缩放、替换、删除    |
+| 画板尺寸             | 根据原始画板推导 PPT 页面尺寸 | 不强制套默认 16:9     |
+| 左对齐、居中、右对齐       | 映射为对应的 PPT 段落对齐方式 | 保持原始阅读关系        |
+| 复杂图形效果           | 作为视觉图层保留          | 视觉优先，必要时人工检查    |
+
+注意：PNG 图层指的是独立图片对象，不代表 PNG 内部像素会变成可编辑矢量。
+
+---
+
+## 工作方式
+
+1. 在 Illustrator 中打开目标 `.ai` 文件，并确认它是当前活动文档。
+2. 选择需要导出的画板序号。第一张画板为 `0`。
+3. 运行 `scripts/export_artboard.jsx`。
+4. 非文字对象按原始对象导出为透明 PNG 图层。
+5. 文字单独导出字体、字号、颜色、位置、换行与对齐信息。
+6. 使用 `scripts/build_pptx.py` 生成 `.pptx`。
+7. 使用 `scripts/verify_pptx.py` 做结构校验。
+8. 在 PowerPoint 或 WPS 中人工检查字体、换行、层级和视觉一致性。
+
+---
+
+## 快速使用
+
+### 1. 准备源文件
+
+* 打开 Adobe Illustrator `.ai` 文件；
+* 确认目标文件处于当前活动状态；
+* 确认需要的字体已经安装；
+* 确认要转换的画板序号。
+
+### 2. 导出 Illustrator 画板
+
+编辑 `scripts/export_artboard.jsx` 顶部参数：
+
+```jsx
+ARTBOARD_INDEX = 0;
+OUT_DIR = "your/export/path";
 ```
 
-安装为 Codex skill：
+然后在 Illustrator 中执行该 JSX 脚本。
 
-```bash
-mkdir -p ~/.codex/skills
-cp -R illustrator-to-editable-ppt-skill ~/.codex/skills/illustrator-to-editable-ppt
+### 3. 生成 PPTX
+
+```powershell
+python scripts/build_pptx.py --manifest <导出目录>/manifest.json --out <输出文件>.pptx
 ```
 
-Windows 用户也可以把本仓库目录复制到自己的 Codex skills 目录中，目录名可保持为 `illustrator-to-editable-ppt`。
+### 4. 校验输出结果
 
-## 使用步骤
-
-1. 用 Illustrator 打开源 `.ai` 文件，并确认它是当前活动文档。
-2. 复制 `scripts/export_artboard.jsx` 到工作目录。
-3. 设置目标画板和导出目录：
-
-```javascript
-var ARTBOARD_INDEX = 0;
-var OUT_DIR = 'exports/artboard_001';
+```powershell
+python scripts/verify_pptx.py <输出文件>.pptx --manifest <导出目录>/manifest.json --show-fonts
 ```
 
-也可以用环境变量覆盖；`AI_TO_PPT_TEXT_GRADIENT_MODE` 可选 `auto`、`off`：
-
-```bash
-AI_TO_PPT_ARTBOARD_INDEX=0 AI_TO_PPT_OUT_DIR=exports/artboard_001 AI_TO_PPT_TEXT_GRADIENT_MODE=auto illustrator export_artboard.jsx
-```
-
-实际的 Illustrator 可执行文件路径因系统和安装位置不同，请使用你本机的 Illustrator 启动方式。
-
-4. Illustrator 弹出脚本安全确认时，点击继续。
-5. 检查导出目录是否包含 `manifest.json` 和 `images/layer_001.png` 等透明 PNG。
-6. 生成 PPT：
-
-```bash
-python scripts/build_pptx.py --manifest exports/artboard_001/manifest.json --out output/artboard_001.pptx
-```
-
-7. 验证 PPT：
-
-```bash
-python scripts/verify_pptx.py output/artboard_001.pptx --manifest exports/artboard_001/manifest.json --show-fonts
-```
-
-8. 用 PowerPoint 或 WPS 打开输出文件，人工比对源 Illustrator 页面。
-
-## 字体映射
-
-脚本默认优先使用 Illustrator 导出的 `fontFamily` 和 `fontFullName`。如果 PowerPoint 或 WPS 无法识别某个 PostScript 字体名，可以提供一个 JSON 字体映射文件：
-
-```json
-{
-  "SourcePostScriptName": "PowerPoint Font Family"
-}
-```
-
-然后运行：
-
-```bash
-python scripts/build_pptx.py --manifest exports/artboard_001/manifest.json --out output/artboard_001.pptx --font-map-json font-map.json
-```
-
-请不要把商业字体文件提交到公开仓库。
-
-## 已知限制
-
-- 转换结果依赖本机 Illustrator、PowerPoint/WPS 和已安装字体。
-- 复杂混合模式、透明度、蒙版、渐变网格、特效和部分嵌套剪切组可能需要人工检查；默认策略优先保留分层，不再用整页单图兜底。
-- 路径查找器/复合形状渐变字只有在与可编辑文字 bounds 可靠匹配时才会标记为 PPT 原生文字渐变；复杂字体、特殊效果和个别换行仍需人工检查，本工具不承诺所有 Illustrator 文件都能自动得到完全一致的结果。
-- PPT 字体渲染与 Illustrator 不完全一致，可能出现轻微换行或字距差异。
-- 竖排文字、路径文字、区域文字的极端形态可能需要额外适配。
-- 当前流程偏向单画板逐页导出；批量处理可在此基础上扩展。
+---
 
 ## 验收标准
 
-- PPT 页面尺寸与 Illustrator 画板尺寸一致。
-- PNG 层数与 `manifest.json` 中的 image 数一致，非文字设计内容应保持多层图片结构。
-- 可编辑文本框数量与 `manifest.json` 中的 text 数一致。
-- 文字可以在 PowerPoint/WPS 中直接编辑，标记出的渐变字应使用 PPT 原生文字渐变。
-- 文本框无填充、无描边、无发光、无模糊。
-- 文本框开启自动换行，不应出现 `wrap="none"`。
-- 居中、右对齐和常规左对齐与源文件一致。
-- 字体、字号、颜色、换行和层级经过人工抽样确认。
-- 复杂字体、特殊效果和个别换行经过人工检查。
+输出 PPT 不应只是“一张能打开的画面”。
 
-## 示例输出说明
+至少应检查：
 
-`examples/` 目录默认只保留占位说明。公开仓库不应附带任何客户源文件、截图、`.ai`/PDF/PPT 或商业字体。你可以在本地自行加入脱敏示例，并确保示例素材具有公开发布权限。
+* PPT 页面尺寸是否与 Illustrator 画板一致；
+* 非文字元素是否保留为多个独立 PNG 图层，而不是整页截图；
+* 可读取的 Illustrator 文本是否已重建为 PowerPoint 文本框；
+* 文字是否可以在 PowerPoint/WPS 中直接编辑；
+* 左对齐、居中、右对齐是否与原稿一致；
+* 字体、字号、颜色、换行和层级是否经过人工抽样确认；
+* 文本框是否无填充、无描边、无发光、无模糊，并正常自动换行；
+* 复杂字体、特殊效果和个别换行是否已人工检查。
 
-## 隐私与版权提醒
+更详细的工作流和问题处理方式见：
 
-- 不要提交客户 `.ai`、`.pdf`、`.pptx`、截图、Logo、品牌素材或未授权图片。
-- 不要提交字体文件，尤其是商业字体。
-- 不要提交导出缓存、临时 PNG、错误日志、环境变量或任何 Token/密钥。
-- 发布前请重新扫描仓库，确认不存在本地绝对路径和私有项目名称。
+* [workflow.md](references/workflow.md)
+* [pitfalls.md](references/pitfalls.md)
+* [user-checklist.md](references/user-checklist.md)
+
+---
+
+## 已知限制
+
+* 该 skill 面向 Adobe Illustrator `.ai` 源文件，不是通用 PDF 转 PPT 工具。
+* 已转曲的文字不会自动恢复为可编辑文本，只能作为视觉图层保留。
+* 缺失字体可能导致 PPT/WPS 出现字体替换、换行变化或视觉偏差。
+* 复杂透明效果、混合模式、滤镜、特殊描边和部分文字效果，可能无法完整映射为 PowerPoint 原生对象。
+* 当前版本经过 Windows 环境下的 Illustrator、PowerPoint/WPS 测试；不同版本的软件仍可能存在渲染差异。
+* 输出后必须进行人工检查，不建议未经验证直接交付客户。
+
+---
+
+## 示例与隐私
+
+本仓库不包含任何客户 `.ai`、`.pdf`、`.pptx`、品牌素材、商业字体或未授权图片。
+
+`assets/demo/` 中的示例仅应使用自制、脱敏或明确获得公开授权的素材。
+
+发布或提交前，请确认：
+
+* 不包含客户项目名称、Logo、截图或数据；
+* 不包含字体文件；
+* 不包含导出缓存、临时 PNG、日志、`.env`、Token 或密钥；
+* 不包含本机绝对路径和私人目录名称。
+
+---
 
 ## License
 
-MIT
+MIT License. See [LICENSE](LICENSE).
