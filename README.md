@@ -48,7 +48,7 @@
 
 ### 生成后的可编辑 PPT
 
-<img src="assets/demo/02-ppt-editable-text.png" alt="Editable text in PowerPoint or WPS">
+![Uploading ScreenShot_2026-06-30_101612_004.png…]()
 
 </td>
 </tr>
