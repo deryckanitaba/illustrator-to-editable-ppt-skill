@@ -41,8 +41,6 @@
 
 <img width="1797" height="986" alt="AI 截图" src="https://github.com/user-attachments/assets/2bc7f2e4-151a-4c84-8156-1d5cd1d0b5f1" />
 
-<img src="assets/demo/01-ai-source.png" alt="Illustrator source artboard">
-
 </td>
 <td width="50%" align="center">
 
