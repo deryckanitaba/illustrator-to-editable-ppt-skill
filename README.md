@@ -48,7 +48,7 @@
 
 ### 生成后的可编辑 PPT
 
-![Uploading ScreenShot_2026-06-30_101612_004.png…]()
+<img width="1751" height="991" alt="ScreenShot_2026-06-30_101612_004" src="https://github.com/user-attachments/assets/a9fa6ce4-f850-4648-a864-2c99f11b09db" />
 
 </td>
 </tr>
